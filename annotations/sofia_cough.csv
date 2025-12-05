@@ -1,4 +1,3 @@
-start_time, end_time, label
 04.05, 04.22, cough
 04.45, 04.49, cough
 07.76, 07.83, cough
@@ -8,5 +7,3 @@ start_time, end_time, label
 15.06, 15.22, cough
 18.99, 19.15, cough
 27.02, 27.07, cough
-30.70, 30.72, cough_unsure
-34.82, 34.85, cough_unsure
