@@ -2,9 +2,9 @@
 # Breathing & Cough Detection
 
 This is the repository for the semester project of Biomedical System Processing, 2025, for the group "OLEMFA" with the following members:
-- Faizyab Ali Shah
-- Muhammed Emre Candir
-- Olena Mikhailova
+- Faizyab Ali Shah (GUBG3I)
+- Muhammed Emre Candir (YDY84J)
+- Olena Mikhailova (H7OGWN)
 
 ## Directories:
 The repository consists of the following directories:
