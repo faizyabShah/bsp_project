@@ -1,4 +1,3 @@
-`
 # Breathing & Cough Detection
 
 This is the repository for the semester project of Biomedical System Processing, 2025, for the group "OLEMFA" with the following members:
