@@ -29,7 +29,7 @@
     \centering
     \vspace*{\fill}
 
-    {\huge \textbf{Acoustic Breathing and Cough Detection for Fatigue Monitoring Using a Microphone} \par}
+    {\huge \textbf{Acoustic Breathing and Cough Detection for Fatigue Monitoring Using a Laptop Microphone} \par}
 
     \vspace{2cm}
 
@@ -56,7 +56,7 @@
 \newpage
 \begin{abstract}
 \noindent
-This project investigates whether non-contact acoustic measurements, recorded using a standard smartphone or laptop microphone, can be used to monitor fatigue-related changes in breathing. We developed a complete signal-processing pipeline that includes envelope extraction, breathing rate estimation, breathing rate variability analysis, and cough detection. Three classical signal-processing approaches were implemented and analyzed: peak-based breathing detection, frequency-domain analysis using FFT, and local autocorrelation. In addition, we designed a robust high-frequency--based cough detector. The results demonstrate that peak-based analysis provides the most accurate and physiologically consistent breathing metrics, achieving 92.9\% accuracy in distinguishing normal from fatigued breathing. The system forms a strong machine-learning foundation for subsequent deep learning analysis.
+This project investigates whether non-contact acoustic measurements, recorded using a standard smartphone or laptop microphone, can be used to monitor fatigue-related changes in breathing. We developed a complete signal-processing pipeline that includes envelope extraction, breathing rate estimation, and cough detection. Two distinct machine learning approaches were developed and analyzed: a Feature-Driven Classification system and a foundational Signal Processing system. The Feature-Driven system used a 38-feature vector (combining temporal rhythm, spectral texture, and physical effort features) with an Extra Trees Classifier, achieving an overall multi-class accuracy of 82.5\%. The system proved that Temporal rhythm (BPM/Duty Cycle) is the primary biomarker for acoustic fatigue monitoring. Complementarily, the foundational Signal Processing system successfully implemented a Peak-Based Rate Detection method, achieving 92.9\% accuracy in the binary classification of Normal vs. Fatigue states using a simple BPM threshold. The results demonstrate that acoustic data, even from consumer-grade hardware, accurately reflects underlying physiological stress responses.
 \end{abstract}
 
 \newpage
@@ -116,6 +116,9 @@ All audio files were manually reviewed to ensure correct labeling. Each recordin
 
 To transition from raw audio to interpretable respiratory biomarkers, a unified preprocessing pipeline was implemented. This stage aims to mitigate environmental noise, standardize amplitude levels across heterogeneous recording devices, and isolate the low-frequency respiratory component. All audio data was ingested at the native sampling rate using \texttt{librosa} \cite{mcfee2015librosa} before entering the multi-stage processing block.
 
+\subsection{General Preprocessing Pipeline}
+Raw audio files were initially sliced strictly according to manual start/end timestamps. Early trials attempting to filter short segments ($< 0.1$ s) resulted in significant data loss (dropping valid short coughs). Therefore, the final pipeline adopted a "No-Filter" approach, preserving all 422 segments to ensure the integrity of transient events like coughs.
+
 \subsection{Respiratory Envelope Extraction}
 The core of the analysis relies on the generation of a smooth, time-domain breathing envelope. We define the envelope extraction process as a sequential pipeline designed to demodulate the amplitude of the breathing sounds.
 
@@ -123,7 +126,7 @@ The envelope $E(t)$ is derived from the raw signal $x(t)$ via the Hilbert Transf
 \begin{equation}
     E(t) = |x(t) + i\mathcal{H}(x(t))|
 \end{equation}
-where $\mathcal{H}(\cdot)$ denotes the Hilbert operator implemented via \texttt{SciPy} \cite{virtanen2020scipy}. To ensure signal stability and physiological relevance, the following processing steps were applied:
+where $\mathcal{H}(\cdot)$ denotes the Hilbert operator implemented via \texttt{SciPy} \cite{virtanen2020scipy}. The following steps were applied primarily to support the extraction of Temporal Features (e.g., BPM, IBI):
 
 \begin{description}
     \item[1. Normalization:] Signals were normalized to eliminate subject-dependent loudness differences and microphone gain variations.
@@ -137,14 +140,44 @@ where $\mathcal{H}(\cdot)$ denotes the Hilbert operator implemented via \texttt{
     \item[5. Downsampling:] The final envelope was downsampled to \textbf{100 Hz} to create a lightweight signal suitable for analysis.
 \end{description}
 
+\subsection{Frame-Based Feature Engineering}
+
+To successfully classify the three physiological states (Normal, Fatigue, and Cough), it was necessary to extract a rich, high-dimensional feature set that captures both the subtle texture of continuous breathing and the impulsive nature of cough events. These features were computed using a short-time framing approach applied to the segmented audio before aggressive low-pass filtering, preserving the high-frequency content critical for spectral analysis. The final feature vector aggregated 38 metrics, categorized as follows:
+
+\subsubsection{Spectral and Texture Features}
+These features analyze the frequency domain to describe the characteristic "sound" or timbre of the respiratory signal.
+
+\begin{itemize}
+    \item \textbf{Mel-Frequency Cepstral Coefficients (MFCCs):} A set of $13$ coefficients and their corresponding standard deviations were extracted to form a $26$-dimensional vector. MFCCs compactly represent the spectral envelope of the respiratory sound, effectively capturing the sound's timbre.
+    \item \textbf{Spectral Centroid:} This feature indicates the "center of mass" of the spectrum and represents the "brightness" of the sound, which can be useful for distinguishing between low-frequency airflow noise and higher-frequency turbulent sounds characteristic of fatigue.
+    \item \textbf{Spectral Entropy:} Measures the peakiness or chaos within the frequency distribution. High entropy suggests noisy, broad-spectrum energy (e.g., turbulent breathing), while low entropy is indicative of a more structured, impulsive event (e.g., a cough).
+    \item \textbf{Energy Ratios (Low/Mid/High):} These quantify the distribution of acoustic energy across defined frequency bands, providing a spectral signature that is critical for distinguishing coughs, which contain high-frequency energy, from breathing, which is dominated by low-frequency energy.
+\end{itemize}
+
+\subsubsection{Physics and Temporal Features}
+These features quantify the physical effort, intensity, and timing dynamics of the respiratory event, which are primary biomarkers of fatigue.
+
+\begin{itemize}
+    \item \textbf{RMS Energy (Root Mean Square Energy):} Used to capture the overall signal intensity or loudness. RMS is a key feature for distinguishing deep, high-intensity fatigue breaths from resting breaths.
+    \item \textbf{Cough Crest Factor:} Defined as the peak amplitude divided by the RMS value. This metric effectively distinguishes impulsive events (high Crest Factor, like a cough) from smoother, continuous segments (low Crest Factor, like breathing).
+    \item \textbf{Duration and Inter-Breath Interval (IBI):} These are core temporal metrics. Duration measures the length of the labeled segment, while IBI quantifies the time between breath cycles, serving as the basis for the Breathing Per Minute (BPM) calculation.
+    \item \textbf{Complexity (Hjorth Mobility):} A measure of the average frequency or mean slope of the signal. It provides insight into the signal's smoothness or rapid fluctuation (complexity).
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figure1}
+\caption{\textbf{Time-frequency analysis of respiratory states.} (Top) Normal breathing shows rhythmic low-frequency energy. (Middle) Fatigue breathing exhibits shorter intervals and broadband turbulence. (Bottom) Coughs appear as distinct vertical impulses with high-frequency content.}
+\label{fig:signal_visualization}
+\end{figure}
 
 % ======================================================================
-% 4. Machine Learning Approach
+% 4. Signal Processing
 % ======================================================================
 \newpage
-\section{Machine Learning Approach}
+\section{Signal Processing}
 
-To quantify respiratory dynamics and classify fatigue states, we implemented a dual-stream analysis framework. The first stream evaluates continuous respiratory rate estimation methods, while the second stream utilizes a spectral-transient algorithm for discrete cough event detection.
+To quantify respiratory dynamics and detect transient cough events, we implemented a dual-stream analysis framework based purely on signal processing techniques.
 
 \subsection{Comparative Respiratory Rate Estimation}
 
@@ -198,47 +231,157 @@ The final system aggregates the outputs of these components into a unified decis
 \end{equation}
 This threshold was derived from the observation that fatigued participants exhibited significantly higher respiratory rates and irregularity compared to the resting baseline.
 
+
 % ======================================================================
-% 5. Experimental Results
+% 5. Feature-Driven Classification
 % ======================================================================
 \newpage
-\section{Experimental Results}
+\section{Feature-Driven Classification: Multi-Class Acoustic Modeling}
 
-The experimental evaluation focused on three key performance indicators: the accuracy of binary classification (Normal vs. Fatigue), the physiological validity of the extracted variability metrics, and the reliability of the transient cough detector.
+The Feature-Driven Classification approach utilized a robust, tree-based machine learning pipeline to perform the final three-class classification: Normal Breathing, Fatigue Breathing, and Cough Events. This method relies on engineering a high-dimensional feature vector to maximize the discriminative power between the physiological states before inputting the data into a classifier.
 
-\subsection{Evaluation of Respiratory Rate Estimation}
+\subsection{Iterative Feature Engineering Strategy}
 
-We assessed the robustness of the three proposed signal processing algorithms by their ability to correctly classify participant states using a threshold of 20 BPM.
+The development of the final feature set was an iterative process, specifically designed to address limitations encountered when distinguishing acoustically similar classes, particularly Normal and Fatigue breathing. The strategy evolved from relying solely on sound quality to incorporating crucial temporal context.
 
-\subsubsection{Performance of the Peak-Based Approach}
-The Peak-Based detection method emerged as the most robust solution, achieving a classification accuracy of \textbf{92.9\%}. Crucially, this method demonstrated superior stability across both test conditions. It successfully tracked the smooth, periodic envelopes of normal breathing while remaining resilient to the irregular, non-stationary patterns characteristic of fatigued breathing. This stability confirmed its selection as the primary estimator for the final system architecture.
+\begin{enumerate}
+    \item \textbf{Iteration 1: Spectral Texture (MFCCs)}: Initial testing focused on spectral characteristics using only Mel-Frequency Cepstral Coefficients (MFCCs). This yielded an accuracy of approximately $70\%$, as the model struggled to differentiate the "sound" of loud normal breathing from mild fatigue based on texture alone.
+    \item \textbf{Iteration 2: Physical Effort and Impulsiveness}: To capture the physical intensity of the breath and the transient nature of coughs, features representing energy and shape were introduced.
+    \begin{itemize}
+        \item \textbf{RMS Energy} was included to quantify overall loudness (intensity), where Fatigue is generally louder than Normal breathing.
+        \item \textbf{Cough Crest Factor} (peak-to-RMS ratio) was added to distinguish impulsive events, like coughs, from the smoother, continuous pattern of breathing.
+    \end{itemize}
+    \item \textbf{Iteration 3: Temporal Context (The Breakthrough)}: Analysis revealed that rhythm (rate and pattern) was a significantly stronger predictor of fatigue than sound texture. A context-aware extractor was implemented to calculate temporal features derived from the envelope analysis described in Section 4.1:
+    \begin{itemize}
+        \item \textbf{BPM (Instantaneous)}: Derived from the Inter-Breath Interval (IBI).
+        \item \textbf{Duty Cycle}: The ratio of breath duration to the total breath cycle. This metric is crucial because fatigue is characterized by a high duty cycle (continuous gasping), while normal breathing exhibits a low duty cycle (long pauses).
+    \end{itemize}
+\end{enumerate}
 
-\subsubsection{Limitations of Spectral and Correlation Methods}
-Alternative methods showed distinct failure modes when exposed to real-world physiological noise:
+\subsubsection{Statistical Validation of Core Features}
+The effectiveness of the chosen features was statistically verified by analyzing the separation between the classes.
+
+\paragraph{Physiological Markers (H1)} Statistical analysis confirmed the acoustic difference between Normal and Fatigue states based on temporal and intensity features, supporting the feature engineering choices in Iterations 2 and 3. As illustrated in Figure \ref{fig:h1_validation}, Fatigue breathing exhibits significantly higher Instantaneous BPM ($p<0.05$) and RMS Intensity compared to Normal breathing.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{figure3}
+\caption{\textbf{Statistical validation of Hypothesis 1.} Fatigue breathing (orange) shows significantly higher Instantaneous BPM ($p< 0.05$) and RMS Intensity compared to Normal breathing (green).}
+\label{fig:h1_validation}
+\end{figure}
+
+
+\paragraph{Spectral Markers (H2)} Analysis of the spectral features confirmed the distinct signature of coughs compared to continuous breathing. As shown in Figure \ref{fig:h2_validation}, coughs exhibit significantly lower spectral entropy and higher high-frequency energy ratios, justifying the inclusion of Spectral Entropy and Energy Ratios in the feature set.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{figure4}
+\caption{\textbf{Spectral differentiation of Cough events (Hypothesis 2).} Coughs exhibit significantly lower spectral entropy and higher high-frequency energy ratios compared to continuous breathing.}
+\label{fig:h2_validation}
+\end{figure}
+
+
+\subsection{Final Feature Set and Model Selection}
+
+\subsubsection{Final Feature Vector}
+The final system utilized a comprehensive 38-feature set to provide maximum discriminative power, encompassing the following four categories:
+
 \begin{itemize}
-    \item \textbf{FFT-Based Estimation:} While effective for rhythmic normal breathing, the FFT approach degraded significantly during fatigue trials, achieving only \textbf{85.7\% accuracy}. The irregular inter-breath intervals and local pauses inherent to fatigue caused spectral leakage, preventing the identification of a single dominant frequency.
-    \item \textbf{Local Autocorrelation:} Although this method numerically matched the peak detection accuracy (\textbf{92.9\%}), it proved unreliable for continuous monitoring. In several normal breathing recordings, the signal envelopes were too smooth to generate distinct correlation peaks, frequently resulting in null outputs (0 BPM).
+    \item \textbf{Temporal Features:} BPM, Duty Cycle, and IBI.
+    \item \textbf{Physics Features:} Duration, RMS Energy, and Crest Factor.
+    \item \textbf{Spectral Features:} Energy Ratios (Low/Mid/High) and Spectral Entropy.
+    \item \textbf{Texture/Complexity Features:} 13 MFCC means, 13 MFCC standard deviations, and Hjorth Mobility.
 \end{itemize}
 
-\subsection{Physiological Validity of Variability Metrics}
-Beyond simple rate estimation, the system successfully captured the fine-grained temporal dynamics of respiration. The analysis of Breath Rate Variability (BRV) metrics—specifically SDNN and RMSSD—revealed a clear physiological distinction between states.
+\subsubsection{Model Selection and Validation}
+A comparative analysis, termed a "Grand Tournament," was conducted across 10 established machine learning algorithms, including Support Vector Machines (SVM), Multi-Layer Perceptron (MLP) Neural Networks, and various Gradient Boosting methods.
 
-Normal breathing was characterized by high regularity, resulting in consistently lower variability scores. In contrast, fatigued breathing exhibited significantly higher SDNN and RMSSD values. These results align with the physiological hypothesis that physical exertion disrupts the respiratory rhythm, introducing variance through shallow breaths and recovery pauses. The Peak-Based method was the only technique capable of consistently capturing these micro-fluctuations.
+Validation was rigorously performed using \textbf{Leave-One-Group-Out (LOSO) cross-validation} to prevent subject-specific overfitting and ensure the model's generalization ability across new participants.
 
-\subsection{Effectiveness of Cough Detection}
-The implementation of the dual-band spectral transient detector significantly improved the integrity of the breathing analysis. By filtering out high-frequency events (600--3000 Hz), the system prevented coughs from being miscounted as respiratory cycles.
+\begin{itemize}
+    \item \textbf{Performance Results:} The Neural Network (MLP) achieved the highest score ($\sim 82.4\%$ Accuracy), closely followed by the Extra Trees Classifier ($\sim 82.2\%$ Accuracy).
+    \item \textbf{Champion Model Selection:} The Extra Trees Classifier (with 200 estimators and balanced class weights) was selected as the final model. This decision was based on its comparable performance to the Neural Network, coupled with superior interpretability and zero dependency on feature scaling, making it inherently more robust for real-time deployment.
+\end{itemize}
 
-While the detector did not achieve perfect rejection—retaining a small number of false positives in cases of sharp speech or noise—it successfully identified the majority of labeled cough events. More importantly, it decoupled artifact detection from rate estimation, ensuring that the primary respiratory metrics remained accurate even in the presence of transient noise.
+\subsubsection{Feature Set Necessity}
+An analysis using Recursive Feature Elimination (RFE) was conducted to explore feature reduction; however, this resulted in a significant drop in accuracy ($\sim 73\%$). This demonstrated that even the features initially considered "weak," such as the lower-order MFCCs, contained subtle, non-linear signals necessary for achieving the optimal decision boundary, justifying the retention of the full 38-feature set.
+
+% ======================================================================
+% 6. Experimental Results
+% ======================================================================
+\newpage
+\section{Experimental Results and Classification Performance}
+
+The experimental evaluation was divided into two parts: assessing the robustness of the core signal processing techniques and evaluating the predictive power of the multi-class machine learning system.
+
+\subsection{Signal Processing Performance and Physiological Validation}
+
+This approach focused on validating the research hypotheses (H1, H2) through statistical analysis and assessing the reliability of the fundamental respiratory rate estimation methods.
+
+\subsubsection{Respiratory Rate Estimation Accuracy}
+The three rate estimation algorithms were evaluated based on their ability to correctly perform a binary classification (Normal vs. Fatigue) using a simple rate threshold ($\text{BPM} < 20$).
+
+\begin{itemize}
+    \item \textbf{Peak-Based Detection} emerged as the most robust method, achieving a classification accuracy of \textbf{92.9\%}. It proved stable across both rhythmic (Normal) and non-stationary (Fatigue) conditions.
+    \item \textbf{Fast Fourier Transform (FFT)} achieved \textbf{85.7\% accuracy}, primarily failing during irregular fatigue states due to spectral leakage.
+    \item \textbf{Local Autocorrelation} matched the peak detection accuracy ($\mathbf{92.9\%}$), but was deemed unreliable for continuous monitoring because the smooth envelopes of normal breathing often failed to produce correlation peaks.
+\end{itemize}
+
+\subsubsection{Scientific Hypothesis Verification}
+Statistical validation using T-Tests confirmed the physiological basis of the feature engineering strategy:
+\begin{itemize}
+    \item \textbf{H1 (Fatigue Markers)}: Confirmed. T-tests for both Breathing Rate (BPM) and Intensity (RMS) yielded $\mathbf{p < 0.05}$ (Significant). Fatigue samples showed a statistically higher mean BPM and RMS intensity compared to Normal breathing . This confirmed that the acoustic data accurately reflects the underlying physiological stress response.
+    \item \textbf{H2 (Cough Differentiation)}: Confirmed. T-tests for Spectral Entropy yielded $\mathbf{p < 0.001}$ (Highly Significant). Coughs exhibited much lower entropy (structured impulse) and contained significantly more energy $>2000$ Hz, confirming they possess a unique spectral signature distinct from continuous breathing .
+\end{itemize}
+
+\subsection{Feature-Driven Classification Performance}
+
+The final Extra Trees Classifier, utilizing the full 38-feature set, was validated using Leave-One-Group-Out (LOSO) cross-validation and achieved an overall multi-class accuracy of \textbf{82.5\%}, confirming Hypothesis H3.
+
+\subsubsection{Overall Classification Performance and Confusion Matrix}
+The detailed performance is illustrated in the Confusion Matrix (Figure \ref{fig:performance}A).
+\begin{itemize}
+    \item \textbf{Cough Detection} was excellent, achieving $>\mathbf{90\%}$ Precision and Recall. Coughs were easily isolated due to their unique spectral properties (high entropy/crest factor).
+    \item The most challenging boundary remained \textbf{Normal vs. Fatigue}. The inclusion of Temporal Features (BPM/Duty Cycle) was critical here, raising Fatigue recall to approximately $\mathbf{80\%}$. Errors primarily occurred in misclassifying transition states (e.g., subjects recovering from fatigue) as Normal.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figure2}
+\caption{Classification Performance of the Extra Trees Model. (A) Confusion Matrix showing classification counts. (B) ROC Curves indicating high sensitivity (AUC $>$ 0.90) for Cough detection. (C) Feature Importance ranking confirming 'Duration' and 'BPM' as primary predictive factors.}
+\label{fig:performance}
+\end{figure}
+
+\subsubsection{ROC Curve Analysis}
+The Area Under Curve (AUC) values derived from the Receiver Operating Characteristic (ROC) curves (Figure \ref{fig:performance}B) demonstrated high model sensitivity across classes:
+\begin{itemize}
+    \item Cough class achieved an AUC of $\mathbf{1.00}$ (perfect separation).
+    \item Fatigue and Normal classes both achieved an AUC of $\mathbf{0.91}$, indicating strong predictive power significantly above chance.
+\end{itemize}
+
+\subsubsection{Feature Importance Ranking}
+The Feature Importance ranking (Figure \ref{fig:performance}C) confirmed the success of the iterative feature engineering strategy:
+\begin{itemize}
+    \item \textbf{Duration and BPM} were consistently ranked in the top 3 features, confirming that \textbf{Respiratory Rate/Rhythm} is the primary acoustic biomarker for fatigue, validating the inclusion of Temporal Context features (Iteration 3).
+    \item \textbf{MFCC\_0\_mean} (related to energy) and \textbf{RMS} were also highly ranked, supporting the use of Physical Effort features (Iteration 2).
+\end{itemize}
+
+\vspace{1em}
+\noindent The system performance of $\mathbf{82.5\%}$ accuracy, verified via robust LOSO validation, successfully confirmed Hypothesis 3.
 
 % ----------------------------------------------------------------------
-% 6. Conclusion
+% 7. Conclusion
 % ----------------------------------------------------------------------
 \newpage
 \section{Conclusion}
 
-This project demonstrates the feasibility of non-contact respiratory monitoring using acoustic recordings captured with everyday devices. Classical signal-processing and machine-learning methods successfully extracted breathing rate, assessed breathing variability, and detected coughs. Among the methods tested, peak-based breathing detection proved most accurate and robust, achieving 92.9\% accuracy in distinguishing fatigue from normal breathing.
+This project successfully demonstrated the feasibility of non-contact respiratory monitoring using acoustic recordings captured with everyday devices. Two complementary approaches achieved high reliability in classifying respiratory states:
 
-The results support our hypotheses regarding the acoustic differences between resting, fatigued, and cough states. This classical approach forms a strong foundation for the deep learning methods that will be integrated in future work.
+\begin{itemize}
+    \item The \textbf{Signal Processing} approach provided a robust foundation by confirming that \textbf{Peak-Based Rate Detection} is the most reliable method for extracting physiological metrics, achieving \textbf{92.9\% binary accuracy} (Normal vs. Fatigue).
+    \item The \textbf{Feature-Driven Classification} approach used the extracted temporal context (BPM/Duty Cycle) alongside spectral features (MFCCs/Entropy) to train an \textbf{Extra Trees Classifier}, achieving a validated \textbf{82.5\% multi-class accuracy}.
+\end{itemize}
+The study verified all three research hypotheses: acoustic data accurately reflects the physiological stress response ($\mathbf{H1}$), coughs possess a unique spectral signature ($\mathbf{H2}$), and the final system performance significantly exceeds chance ($\mathbf{H3}$). By moving beyond simple sound texture and incorporating temporal rhythm analysis, the system overcame the inherent noise limitations of distance recording. This feature-driven model provides a robust, interpretable, and scientifically validated tool for preliminary health screening.
 
 % ----------------------------------------------------------------------
 % References
